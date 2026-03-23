@@ -2,6 +2,7 @@ import psycopg2
 import pygame
 import sys
 
+
 # banco
 conn = psycopg2.connect(
     host="localhost",
@@ -24,6 +25,12 @@ CREATE TABLE IF NOT EXISTS quiz (
     assunto VARCHAR(50)
 );
 """)
+
+cursor.execute("""
+ALTER TABLE quiz
+ADD COLUMN IF NOT EXISTS explicacao TEXT;
+""")
+conn.commit()
 
 # Inserção de dados (uma única vez)
 cursor.executemany("""
@@ -246,7 +253,9 @@ def adicionar_pergunta():
     b = input("Alternativa B: ")
     c = input("Alternativa C: ")
     d = input("Alternativa D: ")
-    correta = input("Resposta correta (A/B/C/D): ").upper()
+    correta=''
+    while correta not in ["A","B","C","D"]:
+        correta = input("Digite apenas A, B, C ou D: ").upper()
     dificuldade = input("Dificuldade: ")
     assunto = input("Assunto: ")
 
@@ -312,17 +321,74 @@ def editar_pergunta():
     nova_pergunta = input("Nova pergunta: ")
 
     cursor.execute("""
-        UPDATE quiz
-        SET pergunta = %s
-        WHERE id = %s
-    """, (nova_pergunta, id_editar))
-
+    UPDATE quiz
+    SET pergunta=%s,
+    alternativa_a=%s,
+    alternativa_b=%s,
+    alternativa_c=%s,
+    alternativa_d=%s,
+    resposta_correta=%s,
+    dificuldade=%s,
+    assunto=%s
+    WHERE id=%s
+    """, (...))
     conn.commit()
     cursor.close()
     conn.close()
 
     print("Pergunta atualizada!\n")
 
+def desenhar_barra_progresso(atual, total):
+    largura_total = 700
+    altura = 25
+    x = 50
+    y = 650
+
+    progresso = atual / total
+    largura = int(largura_total * progresso)
+
+    # fundo
+    pygame.draw.rect(tela, (80,80,80), (x, y, largura_total, altura))
+
+    # progresso
+    pygame.draw.rect(tela, (0,200,0), (x, y, largura, altura))
+
+    # texto
+    texto = font.render(f"{atual}/{total}", True, (255,255,255))
+    tela.blit(texto, (x + 310, y - 30))
+
+
+
+def mostrar_explicacao(texto):
+
+    while True:
+
+        tela.fill((30,30,30))
+
+        titulo = font.render("Você errou!", True, (255,80,80))
+        tela.blit(titulo,(50,50))
+
+        saiba = font.render("Saiba mais:", True, (255,255,255))
+        tela.blit(saiba,(50,120))
+
+        explicacao = font.render(texto, True, (200,200,200))
+        tela.blit(explicacao,(50,170))
+
+        botao = pygame.Rect(50,260,200,50)
+        pygame.draw.rect(tela,(70,130,180),botao)
+        tela.blit(font.render("Continuar",True,(255,255,255)),(80,275))
+
+        pygame.display.flip()
+
+        for event in pygame.event.get():
+
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if botao.collidepoint(event.pos):
+                    return
 def escolher_assunto():
 
     conn = psycopg2.connect(
@@ -387,9 +453,11 @@ assunto_escolhido = escolher_assunto()
 
 #buscar perguntas
 cursor.execute("""
-SELECT pergunta, alternativa_a, alternativa_b, alternativa_c, alternativa_d, resposta_correta
+SELECT pergunta, alternativa_a, alternativa_b, alternativa_c,
+       alternativa_d, resposta_correta, explicacao
 FROM quiz
 WHERE assunto = %s
+ORDER BY RANDOM()
 """, (assunto_escolhido,))
 perguntas = cursor.fetchall()
 
@@ -401,51 +469,107 @@ current = 0
 score = 0
 
 def desenhar_pergunta(q):
-    tela.fill((30, 30, 30))
-    tela.blit(font.render(q[0], True, (255, 255, 255)), (50, 50))
+
+
+    tela.fill((30,30,30))
+    tela.blit(font.render(q[0], True, (255,255,255)), (50,50))
 
     botoes = []
     for i, alt in enumerate(q[1:5]):
-        ret = pygame.Rect(50, 150 + i * 70, 700, 50)
-        pygame.draw.rect(tela, (70, 130, 180), ret)
-        tela.blit(font.render(f"{chr(65+i)}) {alt}", True, (255, 255, 255)), (60, 160 + i * 70))
-        botoes.append(ret)
-
+            ret = pygame.Rect(50,150+i*70,700,50)
+            pygame.draw.rect(tela,(70,130,180),ret)
+            tela.blit(font.render(f"{chr(65+i)}) {alt}",True,(255,255,255)),(60,160+i*70))
+            botoes.append(ret)
+    desenhar_barra_progresso(current, len(perguntas))
     return botoes
 
 rodando = True
 
-while rodando:
+while True:
 
     if current >= len(perguntas):
-        tela.fill((30, 30, 30))
+
+        tela.fill((30,30,30))
         tela.blit(
             font.render(
                 f"Quiz concluído! Pontuação: {score}/{len(perguntas)}",
                 True,
-                (255, 255, 255)
+                (255,255,255)
             ),
-            (50, 200)
+            (150,200)
         )
+
+        botao_menu = pygame.Rect(250,350,300,60)
+        pygame.draw.rect(tela,(70,130,180),botao_menu)
+        tela.blit(font.render("Voltar ao Menu",True,(255,255,255)),(300,370))
+
         pygame.display.flip()
-        pygame.time.wait(5000)
-        break
+
+        for event in pygame.event.get():
+
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if botao_menu.collidepoint(event.pos):
+
+                    # volta pro menu
+                    current = 0
+                    score = 0
+
+                    escolha_menu = menu_principal()
+
+                    if escolha_menu == "Jogar":
+                        assunto_escolhido = escolher_assunto()
+
+                        conn = psycopg2.connect(
+                            host="localhost",
+                            database="postgres",
+                            user="postgres",
+                            password="yuuta123"
+                        )
+                        cursor = conn.cursor()
+
+                        cursor.execute("""
+                        SELECT pergunta, alternativa_a, alternativa_b, alternativa_c,
+                               alternativa_d, resposta_correta,explicacao
+                        FROM quiz
+                        WHERE assunto = %s
+                        ORDER BY RANDOM()
+                        """, (assunto_escolhido,))
+
+                        perguntas = cursor.fetchall()
+                        cursor.close()
+                        conn.close()
+
+        clock.tick(60)
+        continue
 
     botoes = desenhar_pergunta(perguntas[current])
     pygame.display.flip()
 
     for event in pygame.event.get():
+
         if event.type == pygame.QUIT:
-            rodando = False
+            pygame.quit()
             sys.exit()
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
+
             for i, ret in enumerate(botoes):
                 if ret.collidepoint(event.pos):
-                    escolha = chr(65+i)
+
+                    escolha = chr(65 + i)
+
                     if escolha == perguntas[current][5]:
                         score += 1
+                    else:
+                        mostrar_explicacao(perguntas[current][6])
+
                     current += 1
                     pygame.time.wait(200)
 
     clock.tick(60)
+
+
